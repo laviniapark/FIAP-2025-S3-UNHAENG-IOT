@@ -8,9 +8,9 @@ const char* password = "";
 // CONFIGURAÇÕES MQTT
 const char* mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
-const char* topic_events = "fiap/iot/buttons";      // LEFT/RIGHT
-const char* topic_cmd    = "fiap/iot/cmd";          // LED_ON / LED_OFF
-const char* topic_status = "fiap/iot/status";       // online/offline (LWT)
+const char* topic_events = "unaheng/iot/buttons";      // LEFT/RIGHT
+const char* topic_cmd    = "unhaeng/iot/cmd";          // LED_ON / LED_OFF
+const char* topic_status = "unhaeng/iot/status";       // online/offline (LWT)
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -28,22 +28,16 @@ void setup_wifi() {
   delay(10);
   Serial.println("Conectando ao WiFi...");
   WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
   Serial.println("\nWiFi conectado!");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
+  Serial.print("IP: "); Serial.println(WiFi.localIP());
 }
 
 void reconnect() {
   while (!client.connected()) {
     String cid = "esp32-client-fiap-" + String((uint32_t)(ESP.getEfuseMac() & 0xFFFFFFFF), HEX);
     Serial.print("Tentando conexão MQTT como "); Serial.println(cid);
-
+    // LWT: se cair, publica "offline" retido
     if (client.connect(cid.c_str(), nullptr, nullptr, topic_status, 0, true, "offline")) {
       Serial.println("Conectado ao broker!");
       client.subscribe(topic_cmd);
@@ -55,10 +49,13 @@ void reconnect() {
   }
 }
 
-
 void callback(char* topic, byte* message, unsigned int length) {
   String msg;
   for (unsigned i = 0; i < length; i++) msg += (char)message[i];
+
+  // LOG pra você ver o que chegou
+  Serial.print("Mensagem recebida ["); Serial.print(topic); Serial.print("]: ");
+  Serial.println(msg);
 
   if (String(topic) == topic_cmd) {
     if (msg == "LED_ON")  { digitalWrite(LED, HIGH); client.publish(topic_events, "LED_ON_ACK"); }
@@ -72,10 +69,17 @@ void setup() {
   pinMode(BTN_LEFT, INPUT_PULLUP);
   pinMode(BTN_RIGHT, INPUT_PULLUP);
   pinMode(LED, OUTPUT);
+  digitalWrite(LED, LOW);
 
   setup_wifi();
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+
+ //Captura estado inicial p/ não disparar evento falso
+  lastLeft  = digitalRead(BTN_LEFT);
+  lastRight = digitalRead(BTN_RIGHT);
+
+  Serial.println("ESP32 iniciado. Aguardando eventos...");
 }
 
 void loop() {
@@ -86,7 +90,7 @@ void loop() {
   bool nowLeft = digitalRead(BTN_LEFT);
   if (nowLeft != lastLeft && (millis() - lastMsLeft) > DEBOUNCE_MS) {
     lastMsLeft = millis();
-    if (nowLeft == LOW) { // borda de descida = pressionado
+    if (nowLeft == LOW) { // pressionado (PULLUP)
       client.publish(topic_events, "LEFT");
       Serial.println("LEFT");
     }
